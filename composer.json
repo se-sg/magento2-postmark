@@ -20,6 +20,7 @@
         "forum": "https://github.com/sumoheavy/magento2-postmark/issues"
     },
     "require": {
+        "php": "7.2.6",
         "magento/module-backend": "^101.0.0",
         "magento/module-email": "^101.0.0",
         "magento/module-store": "^100.3.0",
