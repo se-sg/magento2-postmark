@@ -20,6 +20,8 @@
  */
 namespace SUMOHeavy\Postmark\Model;
 
+use Zend\Mail\Message as ZendMessage;
+
 class Transport extends \Magento\Framework\Mail\Transport implements \Magento\Framework\Mail\TransportInterface
 {
     /**
@@ -72,7 +74,9 @@ class Transport extends \Magento\Framework\Mail\Transport implements \Magento\Fr
         }
 
         try {
-            $this->_transportPostmark->send($this->_message);
+            $this->_transportPostmark->send(
+                ZendMessage::fromString($this->_message->getRawMessage())
+            );
         } catch (\Exception $e) {
             throw new \Magento\Framework\Exception\MailException(new \Magento\Framework\Phrase($e->getMessage()), $e);
         }

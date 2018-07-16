@@ -20,7 +20,13 @@
  */
 namespace SUMOHeavy\Postmark\Model\Transport;
 
-class Postmark extends \Zend_Mail_Transport_Abstract
+use Zend\Mail\Message as ZendMessage;
+use Zend\Mail\Transport\Sendmail;
+use Zend\Mail\Header\HeaderInterface;
+use Zend\Mime\Mime;
+use Zend\Mime\Message as MimeMessage;
+
+class Postmark extends Sendmail
 {
     /**
      * Postmark API Uri
@@ -61,6 +67,7 @@ class Postmark extends \Zend_Mail_Transport_Abstract
             throw new Exception(__CLASS__ . ' requires API key');
         }
         $this->_apiKey = $apiKey;
+        $this->callable = [$this, '_sendMail'];
     }
 
     /**
@@ -69,20 +76,21 @@ class Postmark extends \Zend_Mail_Transport_Abstract
      * @link http://developer.postmarkapp.com/developer-build.html
      * @return stdClass
      */
-    public function _sendMail()
+    public function _sendMail(ZendMessage $message)
     {
         $data = array(
-            'From' => $this->getFrom(),
-            'To' => $this->getTo(),
-            'Cc' => $this->getCc(),
-            'Bcc' => $this->getBcc(),
-            'Subject' => $this->getSubject(),
-            'ReplyTo' => $this->getReplyTo(),
-            'HtmlBody' => $this->getBodyHtml(),
-            'TextBody' => $this->getBodyText(),
-            'tag' => $this->getTags(),
-            'Attachments' => $this->getAttachments(),
+            'From' => $this->getFrom($message),
+            'To' => $this->getTo($message),
+            'Cc' => $this->getCc($message),
+            'Bcc' => $this->getBcc($message),
+            'Subject' => $this->getSubject($message),
+            'ReplyTo' => $this->getReplyTo($message),
+            'HtmlBody' => $this->getBodyText($message),
+            'TextBody' => $this->getBodyText($message),
+            'tag' => $this->getTags($message),
+            'Attachments' => $this->getAttachments($message),
         );
+        
         $response = $this->prepareHttpClient('/email')
             ->setMethod(\Zend_Http_Client::POST)
             ->setRawData(\Zend_Json::encode($data))
@@ -156,18 +164,36 @@ class Postmark extends \Zend_Mail_Transport_Abstract
      *
      * @return string
      */
-    public function getFrom()
+    public function getFrom(ZendMessage $message)
     {
-        $headers = $this->_mail->getHeaders();
-        $from = array();
-        if (isset($headers['From'])) {
-            foreach ($headers['From'] as $key => $val) {
-                if (empty($key) || $key != 'append') {
-                    $from[] = $val;
-                }
-            }
+        $headers = $message->getHeaders();
+        $hasFrom = $headers->has('from');
+
+        if (! $hasFrom) {
+            throw new Exception\RuntimeException(
+                'Invalid email; contains no "From" header'
+            );
         }
-        return implode(',', $from);
+
+        /** @var Mail\Header\From $from */
+        $from   = $headers->get('from');
+        $list = $from->getAddressList();
+        if (0 == count($list)) {
+            throw new Exception\RuntimeException('Invalid "From" header; contains no addresses');
+        }
+
+        // If not on Windows, return normal string
+        if (! $this->isWindowsOs()) {
+            return $from->getFieldValue(HeaderInterface::FORMAT_ENCODED);
+        }
+
+        // Otherwise, return list of emails
+        $addresses = [];
+        foreach ($list as $address) {
+            $addresses[] = $address->getEmail();
+        }
+        $addresses = implode(', ', $addresses);
+        return $addresses;
     }
 
     /**
@@ -175,18 +201,40 @@ class Postmark extends \Zend_Mail_Transport_Abstract
      *
      * @return string
      */
-    public function getTo()
+    public function getTo(ZendMessage $message)
     {
-        $headers = $this->_mail->getHeaders();
-        $to = array();
-        if (isset($headers['To'])) {
-            foreach ($headers['To'] as $key => $val) {
-                if (empty($key) || $key != 'append') {
-                    $to[] = $val;
-                }
-            }
+        $headers = $message->getHeaders();
+
+        $hasTo = $headers->has('to');
+        if (! $hasTo && ! $headers->has('cc') && ! $headers->has('bcc')) {
+            throw new Exception\RuntimeException(
+                'Invalid email; contains no at least one of "To", "Cc", and "Bcc" header'
+            );
         }
-        return implode(',', $to);
+
+        if (! $hasTo) {
+            return '';
+        }
+
+        /** @var Mail\Header\To $to */
+        $to   = $headers->get('to');
+        $list = $to->getAddressList();
+        if (0 == count($list)) {
+            throw new Exception\RuntimeException('Invalid "To" header; contains no addresses');
+        }
+
+        // If not on Windows, return normal string
+        if (! $this->isWindowsOs()) {
+            return $to->getFieldValue(HeaderInterface::FORMAT_ENCODED);
+        }
+
+        // Otherwise, return list of emails
+        $addresses = [];
+        foreach ($list as $address) {
+            $addresses[] = $address->getEmail();
+        }
+        $addresses = implode(', ', $addresses);
+        return $addresses;
     }
 
     /**
@@ -194,21 +242,40 @@ class Postmark extends \Zend_Mail_Transport_Abstract
      *
      * @return string
      */
-    public function getCc()
+    public function getCc(ZendMessage $message)
     {
-        $headers = $this->_mail->getHeaders();
-        $cc = array();
-        if (isset($headers['Cc'])) {
-            foreach ($headers['Cc'] as $key => $val) {
-                if (empty($key) || $key != 'append') {
-                    $cc[] = $val;
-                }
-            }
+        $headers = $message->getHeaders();
+
+        $hasCc = $headers->has('cc');
+        if (! $hasCc && ! $headers->has('to') && ! $headers->has('bcc')) {
+            throw new Exception\RuntimeException(
+                'Invalid email; contains no at least one of "To", "Cc", and "Bcc" header'
+            );
         }
-        if (count($cc) > self::RECIPIENTS_LIMIT) {
-            throw new Exception('Exceeded Postmark Cc recipients limit per message');
+
+        if (! $hasCc) {
+            return '';
         }
-        return implode(',', $cc);
+
+        /** @var Mail\Header\Cc $cc */
+        $cc   = $headers->get('cc');
+        $list = $cc->getAddressList();
+        if (0 == count($list)) {
+            throw new Exception\RuntimeException('Invalid "To" header; contains no addresses');
+        }
+
+        // If not on Windows, return normal string
+        if (! $this->isWindowsOs()) {
+            return $cc->getFieldValue(HeaderInterface::FORMAT_ENCODED);
+        }
+
+        // Otherwise, return list of emails
+        $addresses = [];
+        foreach ($list as $address) {
+            $addresses[] = $address->getEmail();
+        }
+        $addresses = implode(', ', $addresses);
+        return $addresses;
     }
 
     /**
@@ -216,21 +283,40 @@ class Postmark extends \Zend_Mail_Transport_Abstract
      *
      * @return string
      */
-    public function getBcc()
+    public function getBcc(ZendMessage $message)
     {
-        $headers = $this->_mail->getHeaders();
-        $bcc = array();
-        if (isset($headers['Bcc'])) {
-            foreach ($headers['Bcc'] as $key => $val) {
-                if (empty($key) || $key != 'append') {
-                    $bcc[] = $val;
-                }
-            }
+        $headers = $message->getHeaders();
+
+        $hasBcc = $headers->has('bcc');
+        if (! $hasBcc && ! $headers->has('cc') && ! $headers->has('to')) {
+            throw new Exception\RuntimeException(
+                'Invalid email; contains no at least one of "To", "Cc", and "Bcc" header'
+            );
         }
-        if (count($bcc) > self::RECIPIENTS_LIMIT) {
-            throw new Exception('Exceeded Postmark Bcc recipients limit per message');
+
+        if (! $hasBcc) {
+            return '';
         }
-        return implode(',', $bcc);
+
+        /** @var Mail\Header\Bcc $bcc */
+        $bcc   = $headers->get('bcc');
+        $list = $bcc->getAddressList();
+        if (0 == count($list)) {
+            throw new Exception\RuntimeException('Invalid "To" header; contains no addresses');
+        }
+
+        // If not on Windows, return normal string
+        if (! $this->isWindowsOs()) {
+            return $bcc->getFieldValue(HeaderInterface::FORMAT_ENCODED);
+        }
+
+        // Otherwise, return list of emails
+        $addresses = [];
+        foreach ($list as $address) {
+            $addresses[] = $address->getEmail();
+        }
+        $addresses = implode(', ', $addresses);
+        return $addresses;
     }
 
     /**
@@ -238,18 +324,35 @@ class Postmark extends \Zend_Mail_Transport_Abstract
      *
      * @return string
      */
-    public function getReplyTo()
+    public function getReplyTo(ZendMessage $message)
     {
-        $headers = $this->_mail->getHeaders();
-        $replyTo = array();
-        if (isset($headers['Reply-To'])) {
-            foreach ($headers['Reply-To'] as $key => $val) {
-                if (empty($key) || $key != 'append') {
-                    $replyTo[] = $val;
-                }
-            }
+        $headers = $message->getHeaders();
+
+        $hasReplyTo = $headers->has('reply-to');
+
+        if (! $hasReplyTo) {
+            return '';
         }
-        return implode(',', $replyTo);
+
+        /** @var Mail\Header\ReplyTo $to */
+        $replyTo   = $headers->get('reply-to');
+        $list = $replyTo->getAddressList();
+        if (0 == count($list)) {
+            throw new Exception\RuntimeException('Invalid "To" header; contains no addresses');
+        }
+
+        // If not on Windows, return normal string
+        if (! $this->isWindowsOs()) {
+            return $replyTo->getFieldValue(HeaderInterface::FORMAT_ENCODED);
+        }
+
+        // Otherwise, return list of emails
+        $addresses = [];
+        foreach ($list as $address) {
+            $addresses[] = $address->getEmail();
+        }
+        $addresses = implode(', ', $addresses);
+        return $addresses;
     }
 
     /**
@@ -257,42 +360,32 @@ class Postmark extends \Zend_Mail_Transport_Abstract
      *
      * @return string
      */
-    public function getSubject()
+    public function getSubject(ZendMessage $message)
     {
-        if (function_exists('imap_utf8')) {
-            return imap_utf8($this->_mail->getSubject());
+        $headers = $message->getHeaders();
+        if (! $headers->has('subject')) {
+            return;
         }
-        return $this->_mail->getSubject();
+        $header = $headers->get('subject');
+        return $header->getFieldValue(HeaderInterface::FORMAT_ENCODED);
     }
 
     /**
-     * Get mail body - html
+     * Get mail body
      *
      * @return string
      */
-    public function getBodyHtml()
+    public function getBodyText(ZendMessage $message)
     {
-        if ($this->_mail->getBodyHtml()) {
-            $part = $this->_mail->getBodyHtml();
-            $part->encoding = false;
-            return $part->getContent();
+        if (! $this->isWindowsOs()) {
+            // *nix platforms can simply return the body text
+            return $message->getBodyText();
         }
-        return '';
-    }
 
-    /**
-     * Get mail body - plain
-     *
-     * @return string
-     */
-    public function getBodyText()
-    {
-        if ($this->_mail->getBodyText()) {
-            $part = $this->_mail->getBodyText();
-            $part->encoding = false;
-            return $part->getContent();
-        }
-        return '';
+        // On windows, lines beginning with a full stop need to be fixed
+        $text = $message->getBodyText();
+        $text = str_replace("\n.", "\n..", $text);
+        return $text;
     }
 
     /**
@@ -300,12 +393,12 @@ class Postmark extends \Zend_Mail_Transport_Abstract
      *
      * @return string
      */
-    public function getTags()
+    public function getTags(ZendMessage $message)
     {
-        $headers = $this->_mail->getHeaders();
+        $headers = $message->getHeaders();
         $tags = array();
-        if (isset($headers['postmark-tag'])) {
-            foreach ($headers['postmark-tag'] as $key => $val) {
+        if ($headers->has('postmark-tag')) {
+            foreach ($headers->get('postmark-tag') as $key => $val) {
                 if (empty($key) || $key != 'append') {
                     $tags[] = $val;
                 }
@@ -319,28 +412,40 @@ class Postmark extends \Zend_Mail_Transport_Abstract
      *
      * @return array
      */
-    public function getAttachments()
+    public function getAttachments(ZendMessage $message)
     {
         $attachments = array();
-        if ($this->_mail->hasAttachments) {
-            $parts = $this->_mail->getParts();
+        $body = $message->getBody();
+
+        if($body instanceof MimeMessage)
+        {
+            $parts = $body->getParts();
+
             if (is_array($parts)) {
                 $i = 0;
                 foreach ($parts as $part) {
-                    $attachments[$i] = array(
-                        'ContentType' => $part->type,
-                        'Name' => $part->filename,
-                        'Content' => $part->getContent(),
-                    );
-                    $i++;
+                    if($part->getFileName() != '' && $part->getDisposition() === Mime::DISPOSITION_ATTACHMENT) {
+                        $attachments[$i] = array(
+                            'ContentType' => $part->getType(),
+                            'Name' => $part->getFileName(),
+                            'Content' => $part->getContent()
+                        );
+                        $i++;
+                    }
                 }
             }
         }
+
         return $attachments;
     }
 
-    public function setMail(\Zend_Mail $mail)
+    /**
+     * Send a message
+     *
+     * @param  \Zend\Mail\Message $message
+     */
+    public function send(ZendMessage $message)
     {
-        $this->_mail = $mail;
+        call_user_func($this->callable, $message);
     }
 }
