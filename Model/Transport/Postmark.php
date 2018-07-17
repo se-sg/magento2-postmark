@@ -25,6 +25,7 @@ use Zend\Mail\Transport\Sendmail;
 use Zend\Mail\Header\HeaderInterface;
 use Zend\Mime\Mime;
 use Zend\Mime\Message as MimeMessage;
+use Zend\Mail\Transport\Exception as MailException;
 
 class Postmark extends Sendmail
 {
@@ -90,7 +91,7 @@ class Postmark extends Sendmail
             'tag' => $this->getTags($message),
             'Attachments' => $this->getAttachments($message),
         );
-        
+
         $response = $this->prepareHttpClient('/email')
             ->setMethod(\Zend_Http_Client::POST)
             ->setRawData(\Zend_Json::encode($data))
@@ -170,7 +171,7 @@ class Postmark extends Sendmail
         $hasFrom = $headers->has('from');
 
         if (! $hasFrom) {
-            throw new Exception\RuntimeException(
+            throw new MailException\RuntimeException(
                 'Invalid email; contains no "From" header'
             );
         }
@@ -179,7 +180,7 @@ class Postmark extends Sendmail
         $from   = $headers->get('from');
         $list = $from->getAddressList();
         if (0 == count($list)) {
-            throw new Exception\RuntimeException('Invalid "From" header; contains no addresses');
+            throw new MailException\RuntimeException('Invalid "From" header; contains no addresses');
         }
 
         // If not on Windows, return normal string
@@ -207,7 +208,7 @@ class Postmark extends Sendmail
 
         $hasTo = $headers->has('to');
         if (! $hasTo && ! $headers->has('cc') && ! $headers->has('bcc')) {
-            throw new Exception\RuntimeException(
+            throw new MailException\RuntimeException(
                 'Invalid email; contains no at least one of "To", "Cc", and "Bcc" header'
             );
         }
@@ -220,7 +221,7 @@ class Postmark extends Sendmail
         $to   = $headers->get('to');
         $list = $to->getAddressList();
         if (0 == count($list)) {
-            throw new Exception\RuntimeException('Invalid "To" header; contains no addresses');
+            throw new MailException\RuntimeException('Invalid "To" header; contains no addresses');
         }
 
         // If not on Windows, return normal string
@@ -248,7 +249,7 @@ class Postmark extends Sendmail
 
         $hasCc = $headers->has('cc');
         if (! $hasCc && ! $headers->has('to') && ! $headers->has('bcc')) {
-            throw new Exception\RuntimeException(
+            throw new MailException\RuntimeException(
                 'Invalid email; contains no at least one of "To", "Cc", and "Bcc" header'
             );
         }
@@ -261,7 +262,7 @@ class Postmark extends Sendmail
         $cc   = $headers->get('cc');
         $list = $cc->getAddressList();
         if (0 == count($list)) {
-            throw new Exception\RuntimeException('Invalid "To" header; contains no addresses');
+            throw new MailException\RuntimeException('Invalid "To" header; contains no addresses');
         }
 
         // If not on Windows, return normal string
@@ -289,7 +290,7 @@ class Postmark extends Sendmail
 
         $hasBcc = $headers->has('bcc');
         if (! $hasBcc && ! $headers->has('cc') && ! $headers->has('to')) {
-            throw new Exception\RuntimeException(
+            throw new MailException\RuntimeException(
                 'Invalid email; contains no at least one of "To", "Cc", and "Bcc" header'
             );
         }
@@ -302,7 +303,7 @@ class Postmark extends Sendmail
         $bcc   = $headers->get('bcc');
         $list = $bcc->getAddressList();
         if (0 == count($list)) {
-            throw new Exception\RuntimeException('Invalid "To" header; contains no addresses');
+            throw new MailException\RuntimeException('Invalid "To" header; contains no addresses');
         }
 
         // If not on Windows, return normal string
@@ -338,7 +339,7 @@ class Postmark extends Sendmail
         $replyTo   = $headers->get('reply-to');
         $list = $replyTo->getAddressList();
         if (0 == count($list)) {
-            throw new Exception\RuntimeException('Invalid "To" header; contains no addresses');
+            throw new MailException\RuntimeException('Invalid "To" header; contains no addresses');
         }
 
         // If not on Windows, return normal string
@@ -398,10 +399,13 @@ class Postmark extends Sendmail
         $headers = $message->getHeaders();
         $tags = array();
         if ($headers->has('postmark-tag')) {
-            foreach ($headers->get('postmark-tag') as $key => $val) {
-                if (empty($key) || $key != 'append') {
-                    $tags[] = $val;
+            if($headers->get('postmark-tag') instanceof \ArrayIterator) {
+                foreach ($headers->get('postmark-tag') as $key => $val) {
+                    $tags[] = $val->getFieldValue();
                 }
+            }
+            else {
+                $tags[] = $headers->get('postmark-tag')->getFieldValue();
             }
         }
         return implode(',', $tags);

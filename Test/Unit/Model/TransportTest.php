@@ -18,69 +18,124 @@
  * @notice      The Postmark logo and name are trademarks of Wildbit, LLC
  * @license     http://www.opensource.org/licenses/osl-3.0.php Open Software License (OSL 3.0)
  */
-namespace SUMOHeavy\Postmark\Test\Unit\Model;
+namespace SUMOHeavy\Postmark\Model;
+
+use \Zend\Mail;
+use Magento\Framework\TestFramework\Unit\Helper\ObjectManager;
 
 class TransportTest extends \PHPUnit\Framework\TestCase
 {
     /**
      * @var \PHPUnit_Framework_MockObject_MockObject
      */
-    private $_helper;
+    private $helper;
 
     /**
      * @var \SUMOHeavy\Postmark\Model\Transport
      */
-    private $_transport;
+    private $transport;
 
     /**
      * @var \PHPUnit_Framework_MockObject_MockObject
      */
-    private $_transportPostmarkMock;
+    private $transportPostmarkMock;
+
+    private $message;
 
     public function setUp()
     {
-        $this->_helper = $this->getMockBuilder(\SUMOHeavy\Postmark\Helper\Data::class)
+        $this->objectManager = new ObjectManager($this);
+
+        $this->className = Transport::class;
+
+        $arguments = $this->getConstructorArguments();
+
+        $this->transport = $this
+            ->getMockBuilder($this->className)
+            ->setConstructorArgs($arguments)
+            ->setMethods(['sendMessage'])
+            ->getMock();
+
+        $this->originalSubject = $this
+            ->objectManager
+            ->getObject($this->className, $arguments);
+    }
+
+    protected function getConstructorArguments()
+    {
+        $arguments = $this->objectManager->getConstructArguments($this->className);
+        $this->helper = $this->getMockBuilder(\SUMOHeavy\Postmark\Helper\Data::class)
             ->setMethods(['canUse'])
             ->disableOriginalConstructor()
             ->getMock();
+        $arguments['helper'] = $this->helper;
 
-        $this->_message = $this->getMockBuilder(\Magento\Framework\Mail\Message::class)
+        $this->message = $this->getMockBuilder(\Magento\Framework\Mail\Message::class)
             ->disableOriginalConstructor()
+            ->setMethods(['getRawMessage'])
             ->getMock();
+        $arguments['message'] = $this->message;
 
-        $this->_transportPostmarkMock = $this->getMockBuilder(\SUMOHeavy\Postmark\Model\Transport\Postmark::class)
+        $this->transportPostmarkMock = $this->getMockBuilder(\SUMOHeavy\Postmark\Model\Transport\Postmark::class)
             ->setMethods(['send'])
             ->disableOriginalConstructor()
-            ->setConstructorArgs(['helper' => $this->_helper])
+            ->setConstructorArgs(['helper' => $this->helper])
             ->getMock();
-        $this->_transport = new \SUMOHeavy\Postmark\Model\Transport($this->_message, $this->_transportPostmarkMock, $this->_helper);
+        $arguments['transportPostmarkMock'] = $this->transportPostmarkMock;
+
+        return $arguments;
     }
 
     public function testSendMessage()
     {
-        $this->_helper->expects($this->once())
+        $message = new Mail\Message;
+        $message->setFrom('yash@stadiumgoods.com');
+        $message->addTo('yash+1@stadiumgoods.com');
+
+        $this->helper->expects($this->any())
             ->method('canUse')
             ->will($this->returnValue(true));
 
-        $this->_transportPostmarkMock->expects($this->once())
+        $this->message->expects($this->any())
+            ->method('getRawMessage')
+            ->willReturn($message->toString());
+
+        $this->transportPostmarkMock->expects($this->any())
             ->method('send')
+            ->with(Mail\Message::fromString($this->message->getRawMessage()))
             ->will($this->returnValue(null));
 
-        $this->_transport->sendMessage();
+        $return = $this->transport->expects($this->any())
+            ->method('sendMessage')
+            ->will($this->returnValue(null));
+
+        $this->assertEquals(null, $this->transport->sendMessage());
     }
 
     public function testSendMessageException()
     {
-        $this->_helper->expects($this->once())
+        $message = new Mail\Message;
+        $message->setFrom('yash@stadiumgoods.com');
+        $message->addTo('yash+1@stadiumgoods.com');
+
+        $this->helper->expects($this->any())
             ->method('canUse')
             ->will($this->returnValue(true));
 
-        $this->_transportPostmarkMock->expects($this->once())
+        $this->message->expects($this->any())
+            ->method('getRawMessage')
+            ->willReturn($message->toString());
+
+        $this->transportPostmarkMock->expects($this->any())
             ->method('send')
             ->will($this->throwException(new \SUMOHeavy\Postmark\Model\Transport\Exception('test')));
 
+        $this->transport->expects($this->any())
+            ->method('sendMessage')
+            ->will($this->throwException(new \SUMOHeavy\Postmark\Model\Transport\Exception('test')));
+            
         try {
-            $this->_transport->sendMessage();
+            $this->transport->sendMessage();
             $this->fail('Exception not thrown');
         } catch(\Exception $e) {
             $this->assertEquals('test', $e->getMessage());

@@ -18,7 +18,10 @@
  * @notice      The Postmark logo and name are trademarks of Wildbit, LLC
  * @license     http://www.opensource.org/licenses/osl-3.0.php Open Software License (OSL 3.0)
  */
-namespace SUMOHeavy\Postmark\Test\Unit\Model\Transport;
+namespace SUMOHeavy\Postmark\Model\Transport;
+
+use \Zend\Mail;
+use Magento\Framework\TestFramework\Unit\Helper\ObjectManager;
 
 class PostmarkTest extends \PHPUnit\Framework\TestCase
 {
@@ -41,22 +44,45 @@ class PostmarkTest extends \PHPUnit\Framework\TestCase
     {
         $this->adapter = new \Zend_Http_Client_Adapter_Test();
 
+        $this->objectManager = new ObjectManager($this);
+
+        $this->className = Postmark::class;
+
+        $arguments = $this->getConstructorArguments();
+
+        $this->transport = $this
+            ->getMockBuilder($this->className)
+            ->setConstructorArgs($arguments)
+            ->setMethods()
+            ->getMock();
+
+        $this->originalSubject = $this
+            ->objectManager
+            ->getObject($this->className, $arguments);
+
+        $this->transport->getHttpClient()->setAdapter($this->adapter);
+    }
+
+    protected function getConstructorArguments()
+    {
+        $arguments = $this->objectManager->getConstructArguments($this->className);
+
         $this->helper = $this->getMockBuilder(\SUMOHeavy\Postmark\Helper\Data::class)
             ->setMethods(['getApiKey'])
             ->disableOriginalConstructor()
             ->getMock();
+        $arguments['helper'] = $this->helper;
 
-        $this->helper->expects($this->once())
+        $this->helper->expects($this->any())
             ->method('getApiKey')
             ->will($this->returnValue('test-api-key'));
 
-        $this->transport = new \SUMOHeavy\Postmark\Model\Transport\Postmark($this->helper);
-        $this->transport->getHttpClient()->setAdapter($this->adapter);
+        return $arguments;
     }
 
     public function testSendMail()
     {
-        $mail = new \Zend_Mail;
+        $message = new Mail\Message;
 
         $this->adapter->setResponse(
             "HTTP/1.1 200 OK"        . "\r\n" .
@@ -64,9 +90,9 @@ class PostmarkTest extends \PHPUnit\Framework\TestCase
                                        "\r\n" .
             '{"success": true}'
         );
-
-        $this->transport->setMail($mail);
-        $response = $this->transport->_sendMail();
+        $message->setFrom('yash@stadiumgoods.com');
+        $message->addTo('yash+1@stadiumgoods.com');
+        $response = $this->transport->_sendMail($message);
         $this->assertNotEmpty($response);
         $this->assertTrue($response['success']);
     }
@@ -78,132 +104,91 @@ class PostmarkTest extends \PHPUnit\Framework\TestCase
 
     public function testGetFrom()
     {
-        $mail = new \Zend_Mail;
+        $message = new Mail\Message;
 
-        $this->transport->setMail($mail);
-        $this->assertEmpty($this->transport->getFrom());
-
-        $mail->setFrom('test');
-        $this->assertEquals('test', $this->transport->getFrom());
+        $message->setFrom('yash+1@stadiumgoods.com');
+        $this->assertEquals('yash+1@stadiumgoods.com', $this->transport->getFrom($message));
     }
 
     public function testGetTo()
     {
-        $mail = new \Zend_Mail;
+        $message = new Mail\Message;
 
-        $this->transport->setMail($mail);
-        $this->assertEmpty($this->transport->getTo());
+        $message->addTo('yash+1@stadiumgoods.com');
+        $this->assertEquals('yash+1@stadiumgoods.com', $this->transport->getTo($message));
 
-        $mail->addTo('test');
-        $this->assertEquals('test', $this->transport->getTo());
+        $message->addTo('yash+2@stadiumgoods.com');
 
-        $mail->addTo('test1');
-        $this->assertEquals('test,test1', $this->transport->getTo());
+        $expected = 'yash+1@stadiumgoods.com,yash+2@stadiumgoods.com';
+        $this->assertEquals($expected, str_replace(array(' ', "\n", "\t", "\r"), '', $this->transport->getTo($message)));
     }
 
     public function testGetCc()
     {
-        $mail = new \Zend_Mail;
+        $message = new Mail\Message;
 
-        $this->transport->setMail($mail);
-        $this->assertEmpty($this->transport->getCc());
+        $message->addCc('yash+1@stadiumgoods.com');
+        $this->assertEquals('yash+1@stadiumgoods.com', $this->transport->getCc($message));
 
-        $mail->addCc('test');
-        $this->assertEquals('test', $this->transport->getCc());
+        $message->addCc('yash+2@stadiumgoods.com');
 
-        $mail->addCc('test1');
-        $this->assertEquals('test,test1', $this->transport->getCc());
+        $expected = 'yash+1@stadiumgoods.com,yash+2@stadiumgoods.com';
+        $this->assertEquals($expected,  str_replace(array(' ', "\n", "\t", "\r"), '', $this->transport->getCc($message)));
     }
 
     public function testGetBcc()
     {
-        $mail = new \Zend_Mail;
+        $message = new Mail\Message;
 
-        $this->transport->setMail($mail);
-        $this->assertEmpty($this->transport->getBcc());
+        $message->addBcc('yash+1@stadiumgoods.com');
+        $this->assertEquals('yash+1@stadiumgoods.com', $this->transport->getBcc($message));
 
-        $mail->addBcc('test');
-        $this->assertEquals('test', $this->transport->getBcc());
+        $message->addBcc('yash+2@stadiumgoods.com');
 
-        $mail->addBcc('test1');
-        $this->assertEquals('test,test1', $this->transport->getBcc());
+        $expected = 'yash+1@stadiumgoods.com,yash+2@stadiumgoods.com';
+        $this->assertEquals($expected,  str_replace(array(' ', "\n", "\t", "\r"), '', $this->transport->getBcc($message)));
     }
 
     public function testGetReplyTo()
     {
-        $mail = new \Zend_Mail;
+        $message = new Mail\Message;
 
-        $this->transport->setMail($mail);
-        $this->assertEmpty($this->transport->getReplyTo());
+        $this->assertEmpty($this->transport->getReplyTo($message));
 
-        $mail->setReplyTo('test');
-        $this->assertEquals('test', $this->transport->getReplyTo());
+        $message->setReplyTo('yash+1@stadiumgoods.com');
+        $this->assertEquals('yash+1@stadiumgoods.com', $this->transport->getReplyTo($message));
     }
 
     public function testGetSubject()
     {
-        $mail = new \Zend_Mail;
+        $message = new Mail\Message;
 
-        $this->transport->setMail($mail);
-        $this->assertEmpty($this->transport->getSubject());
+        $this->assertEmpty($this->transport->getSubject($message));
 
-        $mail->setSubject('test');
-        $this->assertEquals('test', $this->transport->getSubject());
-    }
-
-    public function testGetBodyHtml()
-    {
-        $mail = new \Zend_Mail;
-
-        $this->transport->setMail($mail);
-        $this->assertEmpty($this->transport->getBodyHtml());
-
-        $mail->setBodyHtml('test html');
-        $this->assertEquals('test html', $this->transport->getBodyHtml());
+        $message->setSubject('test');
+        $this->assertEquals('test', $this->transport->getSubject($message));
     }
 
     public function testGetBodyText()
     {
-        $mail = new \Zend_Mail;
+        $message = new Mail\Message;
 
-        $this->transport->setMail($mail);
-        $this->assertEmpty($this->transport->getBodyText());
+        $this->assertEmpty($this->transport->getBodyText($message));
 
-        $mail->setBodyText('test text');
-        $this->assertEquals('test text', $this->transport->getBodyText());
+        $message->setBody('test text');
+        $this->assertEquals('test text', $this->transport->getBodyText($message));
     }
 
     public function testGetTags()
     {
-        $mail = new \Zend_Mail;
+        $message = new Mail\Message;
 
-        $this->transport->setMail($mail);
-        $this->assertEmpty($this->transport->getTags());
+        $this->assertEmpty($this->transport->getTags($message));
 
-        $mail->addHeader('postmark-tag', 'test', true);
-        $this->assertEquals('test', $this->transport->getTags());
+        $message->getHeaders()->addHeader(Mail\Header\GenericHeader::fromString("postmark-tag: test"));
+        $this->assertEquals('test', $this->transport->getTags($message));
 
-        $mail->addHeader('postmark-tag', 'test1', true);
-        $this->assertEquals('test,test1', $this->transport->getTags());
-    }
-
-    public function testGetAttachements()
-    {
-        $mail = new \Zend_Mail;
-
-        $this->transport->setMail($mail);
-        $this->assertEmpty($this->transport->getAttachments());
-
-        $at = $mail->createAttachment('test');
-        $at->type        = 'image/gif';
-        $at->disposition = \Zend_Mime::DISPOSITION_INLINE;
-        $at->encoding    = \Zend_Mime::ENCODING_BASE64;
-        $at->filename    = 'test.gif';
-        $this->transport->setMail($mail);
-
-        $attachements = $this->transport->getAttachments();
-        $this->assertNotEmpty($attachements);
-        $this->assertEquals('image/gif', $attachements[0]['ContentType']);
-        $this->assertEquals('test.gif', $attachements[0]['Name']);
+        $message->getHeaders()->addHeader(Mail\Header\GenericHeader::fromString('postmark-tag: test1'));
+        $this->assertEquals('test,test1', $this->transport->getTags($message));
     }
 }
